@@ -12,8 +12,8 @@ android {
         applicationId = "com.shieldguard.callblocker"
         minSdk = 29 // Android 10+ required for RoleManager.ROLE_CALL_SCREENING
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = 4
+        versionName = "4.0.0"
     }
 
     buildTypes {

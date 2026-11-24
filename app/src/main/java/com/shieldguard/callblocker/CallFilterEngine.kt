@@ -7,7 +7,8 @@ import android.provider.ContactsContract
 data class FilterDecision(
     val shouldBlock: Boolean,
     val reasonCode: String,
-    val reasonDescription: String
+    val reasonDescription: String,
+    val callerLabel: String
 )
 
 object CallFilterEngine {
@@ -23,88 +24,140 @@ object CallFilterEngine {
         context: Context,
         rawNumber: String?,
         isAnonymous: Boolean,
-        callerDisplayName: String?
+        callerDisplayName: String?,
+        verificationFailed: Boolean = false
     ): FilterDecision {
-        val prefs = context.getSharedPreferences("shieldguard_prefs", Context.MODE_PRIVATE)
+        ShieldStorage.ensureInitialized(context)
+        val prefs = ShieldStorage.prefs(context)
+
         if (!prefs.getBoolean("protection_active", true)) {
-            return FilterDecision(false, "DISABLED", "Protezione disattivata")
+            return FilterDecision(false, "DISABLED", "Protezione disattivata", rawNumber ?: "Chiamata")
         }
 
         val norm = normalize(rawNumber)
         if (norm in EMERGENCY_NUMBERS) {
-            return FilterDecision(false, "EMERGENCY", "Numero di emergenza prioritario")
+            return FilterDecision(false, "EMERGENCY", "Numero di emergenza prioritario", "Emergenza $norm")
         }
 
         val whitelist = prefs.getStringSet("whitelist", emptySet()) ?: emptySet()
-        if (whitelist.any { w -> val wn = normalize(w); wn.isNotEmpty() && (norm == wn || norm.endsWith(wn)) }) {
-            return FilterDecision(false, "WHITELISTED", "Consentito da Whitelist")
+        if (whitelist.any { w ->
+                val wn = normalize(w)
+                wn.isNotEmpty() && (norm == wn || (norm.length >= 7 && wn.length >= 7 && (norm.endsWith(wn) || wn.endsWith(norm))))
+            }
+        ) {
+            return FilterDecision(false, "WHITELISTED", "Consentito da Whitelist", "Whitelist")
         }
 
         if (isAnonymous && prefs.getBoolean("block_anonymous", true)) {
-            return FilterDecision(true, "ANONYMOUS_BLOCKED", "Chiamata anonima o privata")
+            return FilterDecision(true, "ANONYMOUS_BLOCKED", "Chiamata anonima o numero privato", "Chiamata Anonima")
         }
 
         val blacklist = prefs.getStringSet("blacklist", setOf("+44*", "899*", "+355*")) ?: emptySet()
         for (rule in blacklist) {
             val pattern = normalize(rule)
-            if (pattern.endsWith("*") && norm.startsWith(pattern.dropLast(1))) {
-                return FilterDecision(true, "BLACKLIST_MATCH", "Regola Blacklist ($rule)")
+            if (pattern.endsWith("*") && pattern.length > 1 && norm.startsWith(pattern.dropLast(1))) {
+                return FilterDecision(true, "BLACKLIST_MATCH", "Regola Blacklist ($rule)", "Blacklist")
             } else if (pattern.isNotEmpty() && norm == pattern) {
-                return FilterDecision(true, "BLACKLIST_MATCH", "Numero in Blacklist")
+                return FilterDecision(true, "BLACKLIST_MATCH", "Numero in Blacklist", "Blacklist")
             }
         }
 
-        // Hiya / Android Smart Call spam metadata check
+        // Individual enabled public Spam lists lookup (<1ms)
+        if (prefs.getBoolean("block_spam_db", true)) {
+            val matchedFeed = ShieldStorage.findSpamMatch(context, norm)
+            if (matchedFeed != null) {
+                return FilterDecision(
+                    shouldBlock = true,
+                    reasonCode = "SPAM_DATABASE",
+                    reasonDescription = "Lista Spam: ${matchedFeed.name}",
+                    callerLabel = matchedFeed.name
+                )
+            }
+        }
+
+        // Hiya / Android Smart Call / STIR-SHAKEN spam metadata check
         val displayLower = (callerDisplayName ?: "").lowercase()
-        val isHiyaFlagged = displayLower.contains("spam") ||
+        val isHiyaFlagged = verificationFailed ||
+            displayLower.contains("spam") ||
             displayLower.contains("hiya") ||
             displayLower.contains("frode") ||
-            displayLower.contains("telemarketing")
+            displayLower.contains("truffa") ||
+            displayLower.contains("telemarketing") ||
+            displayLower.contains("sospetto")
         if (prefs.getBoolean("block_hiya_spam", true) && isHiyaFlagged) {
-            return FilterDecision(true, "HIYA_SPAM_BLOCKED", "Segnalato da Hiya / Smart Call")
-        }
-
-        // Automated daily local Spam DB lookup (<1ms HashSet lookup)
-        if (prefs.getBoolean("block_spam_db", true)) {
-            val spamSet = prefs.getStringSet("spam_db_numbers", emptySet()) ?: emptySet()
-            if (norm in spamSet) {
-                return FilterDecision(true, "SPAM_DATABASE", "Database Spam Pubblico Verificato")
-            }
+            return FilterDecision(
+                shouldBlock = true,
+                reasonCode = "HIYA_SPAM_BLOCKED",
+                reasonDescription = "Segnalato come spam da Hiya / Android Smart Call",
+                callerLabel = callerDisplayName?.takeIf { it.isNotBlank() } ?: "Hiya Smart Call"
+            )
         }
 
         // Foreign number check
-        val homeCode = prefs.getString("home_country_code", "39") ?: "39"
-        val allowedForeign = prefs.getStringSet("allowed_foreign_codes", setOf("41")) ?: emptySet()
-        if (prefs.getBoolean("block_foreign", true) && norm.startsWith("+") && !norm.startsWith("+$homeCode")) {
-            val isAllowedForeign = allowedForeign.any { code -> norm.startsWith("+$code") }
+        val homeCode = (prefs.getString("home_country_code", "39") ?: "39").replace(Regex("[^\\d]"), "")
+        val allowedForeign = prefs.getStringSet("allowed_foreign_codes", setOf("41")) ?: setOf("41")
+        if (prefs.getBoolean("block_foreign", true) && norm.startsWith("+") && homeCode.isNotEmpty() && !norm.startsWith("+$homeCode")) {
+            val isAllowedForeign = allowedForeign.any { code -> code.isNotBlank() && norm.startsWith("+$code") }
             if (!isAllowedForeign) {
-                return FilterDecision(true, "FOREIGN_BLOCKED", "Numero estero non autorizzato")
+                return FilterDecision(
+                    shouldBlock = true,
+                    reasonCode = "FOREIGN_BLOCKED",
+                    reasonDescription = "Prefisso estero non autorizzato",
+                    callerLabel = "Numero Estero"
+                )
             }
         }
 
         // Contact lookup
-        if (isInContacts(context, norm)) {
-            return FilterDecision(false, "ALLOWED_CONTACT", "Contatto presente in rubrica")
+        val contactName = findContactName(context, norm)
+        if (contactName != null) {
+            return FilterDecision(
+                shouldBlock = false,
+                reasonCode = "ALLOWED_CONTACT",
+                reasonDescription = "Contatto in rubrica ($contactName)",
+                callerLabel = contactName
+            )
         }
 
         if (prefs.getBoolean("block_unknown", true)) {
-            return FilterDecision(true, "UNKNOWN_NOT_IN_CONTACTS", "Numero non presente in rubrica")
+            return FilterDecision(
+                shouldBlock = true,
+                reasonCode = "UNKNOWN_NOT_IN_CONTACTS",
+                reasonDescription = "Numero sconosciuto non presente in rubrica",
+                callerLabel = "Sconosciuto"
+            )
         }
 
-        return FilterDecision(false, "ALLOWED_NORMAL", "Consentito")
+        return FilterDecision(
+            shouldBlock = false,
+            reasonCode = "ALLOWED_NORMAL",
+            reasonDescription = "Consentito dalle regole correnti",
+            callerLabel = callerDisplayName?.takeIf { it.isNotBlank() } ?: "Chiamante"
+        )
     }
 
-    private fun isInContacts(context: Context, normalizedNumber: String): Boolean {
-        if (normalizedNumber.isBlank()) return false
+    private fun findContactName(context: Context, normalizedNumber: String): String? {
+        if (normalizedNumber.isBlank()) return null
         return try {
             val uri = Uri.withAppendedPath(
                 ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
                 Uri.encode(normalizedNumber)
             )
-            context.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)
-                ?.use { cursor -> cursor.moveToFirst() } ?: false
+            context.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(0) ?: "Rubrica"
+                } else {
+                    null
+                }
+            }
         } catch (_: SecurityException) {
-            false
+            null
         }
     }
 }
