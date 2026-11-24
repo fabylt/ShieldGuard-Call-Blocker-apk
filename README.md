@@ -1,46 +1,51 @@
-# ShieldGuard Call Blocker — Progetto Android Nativo (Kotlin + Jetpack Compose)
+# 🛡️ ShieldGuard Call Blocker
 
-Questo archivio contiene il progetto Android nativo completo di **ShieldGuard**, progettato per Android 10+ (API 29–35) con:
-
-- **`CallScreeningService`** (`ShieldCallScreeningService.kt`): filtraggio chiamate nativo a livello di sistema operativo senza wake-lock (`< 0.1%` batteria in 24 ore), con supporto per:
-  - Blocco numeri sconosciuti (non presenti in rubrica)
-  - Blocco chiamate anonime / private
-  - Blocco numeri esteri con prefissi consentiti configurabili
-  - Blocco database spam pubblico verificato e blacklist con wildcard (`+44*`, `899*`)
-  - Blocco chiamate segnalate come spam da **Hiya / Android Smart Call** (`CALL_VERIFICATION_STATUS_FAILED` e segnalazioni operatore)
-  - Whitelist prioritaria assoluta e bypass numeri di emergenza (112, 113, 115, 118, 911)
-- **`WorkManager`** (`SpamListSyncWorker.kt`): sincronizzazione automatica periodica delle liste spam pubbliche (6h / 12h / 24h) con vincoli opzionali **solo Wi-Fi**, **solo in carica** e rispetto assoluto della **Modalità Offline Privacy**.
-- **`RoleManager.ROLE_CALL_SCREENING`** (`MainActivity.kt`): richiesta nativa per impostare ShieldGuard come app predefinita ID chiamante e spam di Android.
+**ShieldGuard** è un'app Android nativa (Kotlin + Jetpack Compose) per il filtraggio automatico delle chiamate indesiderate, spam e telemarketing, progettata con focus su **privacy locale** e **consumo minimo di batteria**.
 
 ---
 
-## Opzione 1 — Genera il file `.apk` gratis su GitHub (Consigliata, zero installazioni)
+## ✨ Funzionalità principali
 
-Non serve installare Android Studio né Java sul tuo computer: il progetto include già la pipeline automatica `.github/workflows/build-apk.yml`.
-
-1. Crea un nuovo repository (anche privato) su [GitHub](https://github.com/new).
-2. Estrai questo file ZIP e carica tutti i file della cartella `android-app` nel repository (assicurandoti che `.github/workflows/build-apk.yml` sia presente nella root del repository).
-3. Apri la scheda **Actions** del repository su GitHub.
-4. Esegui il workflow **Build ShieldGuard Android APK** (si avvia anche automaticamente ad ogni push).
-5. Al termine della compilazione (circa 2 minuti), scarica l'artefatto **`ShieldGuard-Android-APK`** contenente `app-debug.apk`.
-6. Trasferisci `app-debug.apk` sullo smartphone Android, installalo abilitando *Origini sconosciute*, apri ShieldGuard e tocca **Imposta come app ID chiamante e spam**.
+- **Integrazione nativa Android (`CallScreeningService`)**: filtra le chiamate direttamente a livello di sistema operativo senza processi sempre attivi né wake-lock (`< 0,1%` di batteria in 24 ore).
+- **Protezione completa su 5 filtri rapidi**:
+  - Blocco **numeri sconosciuti** (non salvati in rubrica o Whitelist)
+  - Blocco **chiamate anonime / private**
+  - Blocco **numeri esteri** con eccezioni configurabili per prefisso (es. `+41`)
+  - Blocco tramite **5 liste spam pubbliche** selezionabili singolarmente (*AGCOM Registro Pubblico*, *Tellows Community*, *Hiya / Smart Call Threat Feed*, *Global Robocall DB*, *Osservatorio Truffe Italia*) con conteggio dei numeri coperti
+  - Blocco **Spam Hiya / Android Smart Call** e chiamate non verificate (STIR/SHAKEN)
+- **Statistiche e Registro Chiamate**: contatori giornalieri e totali, grafico degli ultimi 7 giorni, filtri per categoria, simulatore di test e aggiunta rapida in Whitelist.
+- **Liste personalizzate**: gestione di **Whitelist** (priorità assoluta), **Blacklist** con wildcard (es. `+44*`, `899*`) e prefissi esteri autorizzati. I numeri di emergenza (`112`, `113`, `115`, `118`, `911`) non vengono mai bloccati.
+- **Sincronizzazione automatica (`WorkManager`)**: aggiornamento programmato ogni 6h / 12h / 24h con opzioni *Solo Wi-Fi* e *Solo in ricarica*.
+- **Modalità Offline Privacy & Backup JSON**: funzionamento 100% locale senza richieste di rete ed esportazione/ripristino delle impostazioni in formato JSON.
 
 ---
 
-## Opzione 2 — Compila il file `.apk` in locale con Android Studio
+## 📱 Requisiti
 
-Requisiti: Android Studio (Koala o successivo) con JDK 17 e Android SDK 35.
+- **Android 10 (API 29) o superiore** (consigliato Android 12–15)
+- Impostazione di ShieldGuard come app predefinita per **ID chiamante e spam**
 
-1. Estrai lo ZIP e apri la cartella in **Android Studio** (*File → Open*).
-2. Attendi la sincronizzazione di Gradle.
-3. Compila l'APK dal menu **Build → Build Bundle(s) / APK(s) → Build APK(s)** oppure da terminale:
+---
 
+## 📥 Installazione (APK)
+
+1. Scarica l'ultimo file `.apk` dalla sezione **[Releases](../../releases)** di questo repository.
+2. Apri il file `.apk` sullo smartphone Android (se richiesto, consenti l'installazione da *origini sconosciute* per il browser o file manager).
+3. Avvia **ShieldGuard** e tocca **Imposta App Predefinita** per abilitare il filtraggio di sistema.
+4. *(Consigliato)* Nella scheda **Opzioni**, concedi l'accesso alla **Rubrica** per evitare di bloccare i tuoi contatti salvati.
+
+---
+
+## 🛠️ Compilazione dell'APK
+
+### Tramite GitHub Actions (consigliato)
+1. Apri la scheda **Actions** del repository.
+2. Seleziona il workflow **Build ShieldGuard Android APK** e clicca su **Run workflow**.
+3. Al termine della build (~2 minuti), scarica l'artefatto contenente il file `.apk`.
+
+### In locale con Android Studio
+Requisiti: **Android Studio** con **JDK 17** e **Android SDK 35**.
 ```bash
 gradle assembleDebug
-```
-
-Il file `.apk` verrà generato in:
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+# oppure per la release firmata:
+gradle assembleRelease
