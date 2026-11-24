@@ -2,6 +2,8 @@
 
 **ShieldGuard** è un'app Android nativa (Kotlin + Jetpack Compose) per il filtraggio automatico delle chiamate indesiderate, spam e telemarketing, progettata con focus su **privacy locale** e **consumo minimo di batteria**.
 
+<img width="314" height="553" alt="image" src="https://github.com/user-attachments/assets/5d97708b-c4fe-41f0-87c9-b82a3bebb7d0" />
+
 ---
 
 ## ✨ Funzionalità principali
